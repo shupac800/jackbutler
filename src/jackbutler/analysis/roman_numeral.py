@@ -1,8 +1,13 @@
+import re
+
 from music21 import chord as m21chord, roman
 
 from jackbutler.analysis.base import BaseAnalyzer
 from jackbutler.analysis.models import ChordInfo
 from jackbutler.parsing.models import ParsedMeasure
+
+# Strip inversion figures (trailing digits) from roman numeral, keep quality symbols
+_STRIP_FIGURES = re.compile(r"[0-9]+$")
 
 
 class RomanNumeralAnalyzer(BaseAnalyzer):
@@ -20,7 +25,7 @@ class RomanNumeralAnalyzer(BaseAnalyzer):
             try:
                 c = m21chord.Chord(chord_info.midi_pitches)
                 rn = roman.romanNumeralFromChord(c, key_result)
-                numerals.append(rn.figure)
+                numerals.append(_STRIP_FIGURES.sub("", rn.figure))
             except Exception:
                 numerals.append("?")
 
