@@ -311,6 +311,63 @@ main {
     border-radius: 0 4px 4px 0;
 }
 
+/* Chord confidence in badge */
+.chord-badge .confidence {
+    font-weight: 400;
+    opacity: 0.7;
+    font-size: 0.75rem;
+}
+
+/* Alternatives Panel */
+.alternatives-panel {
+    flex-shrink: 0;
+    order: 3;
+    background: #151515;
+    border: 1px solid #252525;
+    border-radius: 6px;
+    padding: 0.4rem;
+    min-width: 120px;
+    align-self: center;
+}
+
+.alternatives-label {
+    color: #666;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.3rem;
+    padding: 0 0.25rem;
+}
+
+.alt-row {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #aaa;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.alt-row:hover {
+    background: #252525;
+    color: #e0e0e0;
+}
+
+.alt-rn {
+    color: #6060cc;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.alt-conf {
+    margin-left: auto;
+    color: #666;
+    font-size: 0.7rem;
+}
+
 .hidden {
     display: none !important;
 }

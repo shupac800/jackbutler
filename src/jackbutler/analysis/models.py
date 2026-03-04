@@ -8,6 +8,8 @@ class ChordInfo(BaseModel):
     root: str
     midi_pitches: list[int]
     beat_position: float
+    confidence: float = 0.0
+    roman_numeral: str = ""
 
 
 class MeasureAnalysis(BaseModel):
@@ -18,6 +20,7 @@ class MeasureAnalysis(BaseModel):
     mode: str | None = None
     key_confidence: float | None = None
     chords: list[ChordInfo] = []
+    chord_alternatives: list[ChordInfo] = []
     roman_numerals: list[str] = []
     scale_degrees: list[str] = []  # e.g. ["A=i", "C=III", "D=iv"]
     commentary: str = ""

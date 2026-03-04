@@ -46,6 +46,7 @@ function pitchToVexKey(pitchName) {
 }
 
 let analysisData = null;
+let currentTrack = null; // track currently being displayed
 let measureCounter = 0; // unique IDs for VexFlow containers
 
 // Auto-load demo on page load
@@ -252,7 +253,7 @@ function renderMeasures(track) {
     measuresEl.innerHTML = "";
     measureCounter = 0;
 
-    track.measures.forEach((m) => {
+    track.measures.forEach((m, mIdx) => {
         const card = document.createElement("div");
         card.className = "measure-card";
         measureCounter++;
@@ -267,11 +268,15 @@ function renderMeasures(track) {
         const hasChords = m.chords && m.chords.length > 0;
         if (hasChords) {
             m.chords.forEach((c, i) => {
-                const rn = m.roman_numerals && m.roman_numerals[i];
+                const rn = c.roman_numeral || (m.roman_numerals && m.roman_numerals[i]);
                 if (rn) {
                     html += `<span class="numeral-badge">${rn}</span>`;
                 }
-                html += `<span class="chord-badge">${c.name}</span>`;
+                html += `<span class="chord-badge">${c.name}`;
+                if (c.confidence > 0) {
+                    html += ` <span class="confidence">${Math.round(c.confidence * 100)}%</span>`;
+                }
+                html += `</span>`;
             });
         }
         if (m.detected_key && !hasChords) {
@@ -288,12 +293,24 @@ function renderMeasures(track) {
         }
         html += `</div>`;
 
-        // Notation + Tab side by side
+        // Notation + Tab + Alternatives side by side
         const tabSvg = buildTab(m, track.string_count);
         html += `<div class="notation-tab-row">`;
         html += `<div class="notation-pane" id="${notationId}"></div>`;
         if (tabSvg) {
             html += `<div class="tab-display">${tabSvg}</div>`;
+        }
+        // Alternatives panel
+        const alts = m.chord_alternatives || [];
+        if (alts.length > 0) {
+            html += `<div class="alternatives-panel">`;
+            html += `<div class="alternatives-label">Alternatives</div>`;
+            alts.forEach((alt, ai) => {
+                const pct = alt.confidence > 0 ? ` ${Math.round(alt.confidence * 100)}%` : "";
+                const rn = alt.roman_numeral ? `<span class="alt-rn">${alt.roman_numeral}</span> ` : "";
+                html += `<div class="alt-row" data-measure-idx="${mIdx}" data-alt-idx="${ai}">${rn}${alt.name}<span class="alt-conf">${pct}</span></div>`;
+            });
+            html += `</div>`;
         }
         html += `</div>`;
 
@@ -352,4 +369,35 @@ function renderMeasures(track) {
         // Render VexFlow notation after the DOM element exists
         renderNotation(notationId, m, m.time_sig);
     });
+
+    // Attach click handlers for alternative rows
+    measuresEl.querySelectorAll(".alt-row").forEach((row) => {
+        row.addEventListener("click", () => {
+            const mi = parseInt(row.dataset.measureIdx, 10);
+            const ai = parseInt(row.dataset.altIdx, 10);
+            switchToAlternative(track, mi, ai);
+        });
+    });
+}
+
+function switchToAlternative(track, measureIdx, altIdx) {
+    const m = track.measures[measureIdx];
+    if (!m || !m.chord_alternatives || !m.chord_alternatives[altIdx]) return;
+    const alt = m.chord_alternatives[altIdx];
+
+    // Swap: current primary becomes an alternative, clicked alternative becomes primary
+    const oldPrimary = m.chords[0];
+    // Remove clicked alt from alternatives, add old primary
+    const newAlts = m.chord_alternatives.filter((_, i) => i !== altIdx);
+    if (oldPrimary) {
+        newAlts.push(oldPrimary);
+        // Sort by confidence descending
+        newAlts.sort((a, b) => b.confidence - a.confidence);
+    }
+    m.chords = [alt];
+    m.chord_alternatives = newAlts;
+    m.roman_numerals = [alt.roman_numeral || "?"];
+
+    // Re-render the entire track (simplest way to refresh notation + tab + coloring)
+    renderMeasures(track);
 }
