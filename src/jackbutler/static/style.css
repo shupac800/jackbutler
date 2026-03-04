@@ -147,6 +147,15 @@ main {
     font-size: 0.85rem;
 }
 
+.chord-badge {
+    background: #3a1e3a;
+    color: #df6bdf;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
 .key-badge {
     background: #1e3a1e;
     color: #6bdf6b;

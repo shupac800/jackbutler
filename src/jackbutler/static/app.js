@@ -13,6 +13,7 @@ const DEGREE_COLORS = {
     1: "#cc7777", // root - muted red
     3: "#cccc77", // third - muted yellow
     5: "#7777cc", // fifth - muted blue
+    7: "#cc77cc", // seventh - muted purple
 };
 const DEFAULT_NOTE_COLOR = "#e0e0e0";
 
@@ -240,6 +241,9 @@ function renderMeasures(track) {
         html += `<div class="measure-header">`;
         html += `<span class="measure-number">M${m.measure_number}</span>`;
         html += `<span class="time-sig">${m.time_sig}</span>`;
+        if (m.chords && m.chords.length > 0) {
+            html += `<span class="chord-badge">${m.chords.map((c) => c.name).join(" ")}</span>`;
+        }
         if (m.detected_key) {
             const lowConf = m.key_confidence !== null && m.key_confidence < 0.8;
             const matchesGlobal = m.detected_key === m.global_key;

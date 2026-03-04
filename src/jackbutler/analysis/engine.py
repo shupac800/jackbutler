@@ -1,3 +1,5 @@
+from music21 import chord as m21chord, pitch as m21pitch
+
 from jackbutler.analysis.base import BaseAnalyzer
 from jackbutler.analysis.chord_analyzer import ChordAnalyzer
 from jackbutler.analysis.commentary import CommentaryGenerator
@@ -8,12 +10,30 @@ from jackbutler.analysis.key_analyzer import (
     get_scale_degree_label,
 )
 from jackbutler.analysis.models import (
+    ChordInfo,
     MeasureAnalysis,
     SongAnalysis,
     TrackAnalysis,
 )
 from jackbutler.analysis.roman_numeral import RomanNumeralAnalyzer
 from jackbutler.parsing.models import ParsedMeasure, ParsedSong
+
+
+def _chord_tone_map(chord_info: ChordInfo) -> dict[str, int]:
+    """Build a pitch-class → chord-tone-degree map (root=1, 3rd=3, 5th=5, 7th=7)."""
+    c = m21chord.Chord(chord_info.midi_pitches)
+    tone_map: dict[str, int] = {}
+    try:
+        tone_map[c.root().name] = 1
+    except Exception:
+        pass
+    if c.third:
+        tone_map[c.third.name] = 3
+    if c.fifth:
+        tone_map[c.fifth.name] = 5
+    if c.seventh:
+        tone_map[c.seventh.name] = 7
+    return tone_map
 
 
 class AnalysisEngine:
@@ -109,36 +129,64 @@ class AnalysisEngine:
                     context.update(findings)
                     results.update(findings)
 
-                # After analyzers: annotate beats with degree numbers
-                # using the chosen key (from KeyAnalyzer)
+                # After analyzers: annotate beats with degree numbers.
+                # When a chord is detected, color by chord tone (root=1, 3rd=3, 5th=5).
+                # Otherwise fall back to scale degree in the detected key.
+                chords: list[ChordInfo] = context.get("chords", [])
                 chosen_key = context.get("key_result") or global_key
                 scale_degrees: list[str] = []
                 annotated_beats = []
-                if chosen_key:
-                    from music21 import pitch as m21pitch
-                    seen_pcs: set[str] = set()
-                    for beat in measure.beats:
-                        annotated_notes = []
-                        for n in beat.notes:
-                            pc = m21pitch.Pitch(midi=n.midi).name
-                            degree_num = None
-                            if not n.is_tied:
+
+                # Build chord-tone map if we have chords
+                ct_map: dict[str, int] = {}
+                if chords:
+                    # Use the first/primary chord for coloring
+                    ct_map = _chord_tone_map(chords[0])
+
+                seen_pcs: set[str] = set()
+                for beat in measure.beats:
+                    annotated_notes = []
+                    for n in beat.notes:
+                        pc = m21pitch.Pitch(midi=n.midi).name
+                        degree_num = None
+                        if not n.is_tied:
+                            if ct_map:
+                                # Color by chord tone
+                                degree_num = ct_map.get(pc)
+                            elif chosen_key:
+                                # Fall back to key-based scale degree
                                 try:
                                     degree_num = chosen_key.getScaleDegreeFromPitch(
                                         m21pitch.Pitch(pc)
                                     )
                                 except Exception:
                                     pass
-                                if pc not in seen_pcs:
-                                    seen_pcs.add(pc)
+                            if pc not in seen_pcs:
+                                seen_pcs.add(pc)
+                                if ct_map:
+                                    ct_deg = ct_map.get(pc)
+                                    if ct_deg == 1:
+                                        label = "root"
+                                    elif ct_deg == 3:
+                                        label = "3rd"
+                                    elif ct_deg == 5:
+                                        label = "5th"
+                                    elif ct_deg == 7:
+                                        label = "7th"
+                                    else:
+                                        label = None
+                                    scale_degrees.append(
+                                        f"{pc}={label}" if label else f"{pc}=passing"
+                                    )
+                                elif chosen_key:
                                     label = get_scale_degree_label(pc, chosen_key)
                                     scale_degrees.append(
                                         f"{pc}={label}" if label else f"{pc}=chromatic"
                                     )
-                            annotated_notes.append(n.model_copy(update={"degree": degree_num}))
-                        annotated_beats.append(beat.model_copy(update={"notes": annotated_notes}))
-                    results["beats"] = annotated_beats
-                    results["scale_degrees"] = scale_degrees
+                        annotated_notes.append(n.model_copy(update={"degree": degree_num}))
+                    annotated_beats.append(beat.model_copy(update={"notes": annotated_notes}))
+                results["beats"] = annotated_beats
+                results["scale_degrees"] = scale_degrees
 
                 measure_analyses.append(MeasureAnalysis(**results))
 
