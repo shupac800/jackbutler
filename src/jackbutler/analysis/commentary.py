@@ -1,4 +1,4 @@
-from music21 import chord as m21chord, key as m21key, pitch as m21pitch
+from music21 import chord as m21chord, interval as m21interval, key as m21key, pitch as m21pitch
 
 from jackbutler.analysis.base import BaseAnalyzer
 from jackbutler.analysis.key_analyzer import (
@@ -36,12 +36,26 @@ def _key_name(k: m21key.Key) -> str:
     return f"{k.tonic.name} {k.mode}"
 
 
-def _chord_tone_label(pc: str, chord: m21chord.Chord) -> str | None:
-    """Return a chord-tone label like 'root', 'b3', '5th' for a pitch class."""
+def _interval_from_root(pc: str, root_name: str) -> str:
+    """Return the interval name from the chord root to a pitch class (e.g. 'P4', 'm6')."""
+    try:
+        root = m21pitch.Pitch(root_name + "3")
+        target = m21pitch.Pitch(pc + "3")
+        # Ensure ascending
+        if target.midi < root.midi:
+            target.octave += 1
+        iv = m21interval.Interval(root, target)
+        return iv.semiSimpleName
+    except Exception:
+        return "?"
+
+
+def _chord_tone_label(pc: str, chord: m21chord.Chord) -> str:
+    """Return a chord-tone label like 'root', 'b3', '5th', or interval from root."""
     try:
         root_name = chord.root().name
     except Exception:
-        return None
+        return "?"
     if pc == root_name:
         return "root"
     third = chord.third
@@ -53,7 +67,8 @@ def _chord_tone_label(pc: str, chord: m21chord.Chord) -> str | None:
     seventh = chord.seventh
     if seventh and pc == seventh.name:
         return "7th"
-    return None
+    # Non-chord tone: label by interval from root
+    return _interval_from_root(pc, root_name)
 
 
 def _chord_commentary(
@@ -67,13 +82,7 @@ def _chord_commentary(
     c = m21chord.Chord(chord_info.midi_pitches)
 
     # Describe chord tones
-    tone_parts = []
-    for pc in pcs:
-        label = _chord_tone_label(pc, c)
-        if label:
-            tone_parts.append(f"{pc}={label}")
-        else:
-            tone_parts.append(f"{pc}=passing")
+    tone_parts = [f"{pc}={_chord_tone_label(pc, c)}" for pc in pcs]
     parts.append(f"{chord_info.name}: {', '.join(tone_parts)}.")
 
     # Explain relationship to global key

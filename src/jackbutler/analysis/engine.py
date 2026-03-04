@@ -1,4 +1,4 @@
-from music21 import chord as m21chord, pitch as m21pitch
+from music21 import chord as m21chord, interval as m21interval, pitch as m21pitch
 
 from jackbutler.analysis.base import BaseAnalyzer
 from jackbutler.analysis.chord_analyzer import ChordAnalyzer
@@ -34,6 +34,36 @@ def _chord_tone_map(chord_info: ChordInfo) -> dict[str, int]:
     if c.seventh:
         tone_map[c.seventh.name] = 7
     return tone_map
+
+
+def _interval_from_root(pc: str, root_name: str) -> str:
+    """Return the interval shorthand from chord root to a pitch class (e.g. 'P4')."""
+    try:
+        root = m21pitch.Pitch(root_name + "3")
+        target = m21pitch.Pitch(pc + "3")
+        if target.midi < root.midi:
+            target.octave += 1
+        return m21interval.Interval(root, target).semiSimpleName
+    except Exception:
+        return "?"
+
+
+def _chord_tone_label(
+    ct_deg: int | None, pc: str, chord_root: str | None
+) -> str:
+    """Return a display label for a pitch in chord context."""
+    if ct_deg == 1:
+        return "root"
+    if ct_deg == 3:
+        return "3rd"
+    if ct_deg == 5:
+        return "5th"
+    if ct_deg == 7:
+        return "7th"
+    # Non-chord tone: show interval from root
+    if chord_root:
+        return _interval_from_root(pc, chord_root)
+    return "?"
 
 
 class AnalysisEngine:
@@ -139,9 +169,11 @@ class AnalysisEngine:
 
                 # Build chord-tone map if we have chords
                 ct_map: dict[str, int] = {}
+                chord_root: str | None = None
                 if chords:
                     # Use the first/primary chord for coloring
                     ct_map = _chord_tone_map(chords[0])
+                    chord_root = chords[0].root
 
                 seen_pcs: set[str] = set()
                 for beat in measure.beats:
@@ -164,20 +196,10 @@ class AnalysisEngine:
                             if pc not in seen_pcs:
                                 seen_pcs.add(pc)
                                 if ct_map:
-                                    ct_deg = ct_map.get(pc)
-                                    if ct_deg == 1:
-                                        label = "root"
-                                    elif ct_deg == 3:
-                                        label = "3rd"
-                                    elif ct_deg == 5:
-                                        label = "5th"
-                                    elif ct_deg == 7:
-                                        label = "7th"
-                                    else:
-                                        label = None
-                                    scale_degrees.append(
-                                        f"{pc}={label}" if label else f"{pc}=passing"
+                                    label = _chord_tone_label(
+                                        ct_map.get(pc), pc, chord_root
                                     )
+                                    scale_degrees.append(f"{pc}={label}")
                                 elif chosen_key:
                                     label = get_scale_degree_label(pc, chosen_key)
                                     scale_degrees.append(
