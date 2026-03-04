@@ -45,8 +45,173 @@ function pitchToVexKey(pitchName) {
     return noteName + "/" + octave;
 }
 
+// Pitch class name → semitone number (handles both sharps and flats)
+const PC_TO_SEMI = {
+    "C": 0, "C#": 1, "D-": 1, "D": 2, "D#": 3, "E-": 3,
+    "E": 4, "E#": 5, "F-": 4, "F": 5, "F#": 6, "G-": 6,
+    "G": 7, "G#": 8, "A-": 8, "A": 9, "A#": 10, "B-": 10,
+    "B": 11, "C-": 11,
+};
+
+const SEMI_TO_INTERVAL = {
+    0: "P1", 1: "m2", 2: "M2", 3: "m3", 4: "M3", 5: "P4",
+    6: "TT", 7: "P5", 8: "m6", 9: "M6", 10: "m7", 11: "M7",
+};
+
+function pitchClassFromName(pitchName) {
+    return pitchName.replace(/\d+$/, "");
+}
+
+/** Build a semitone-PC → degree map from a ChordInfo's root + midi_pitches. */
+function buildChordToneMap(chord) {
+    const rootSemi = PC_TO_SEMI[chord.root];
+    if (rootSemi === undefined) return {};
+    const map = {};
+    for (const midi of chord.midi_pitches) {
+        const pc = midi % 12;
+        const interval = (pc - rootSemi + 12) % 12;
+        if (interval === 0) map[pc] = 1;
+        else if (interval <= 4) map[pc] = 3;
+        else if (interval <= 8) map[pc] = 5;
+        else map[pc] = 7;
+    }
+    return map;
+}
+
+/** Return a human label for a note's role relative to a chord. */
+function chordToneLabel(degree, noteSemi, rootSemi) {
+    if (degree === 1) return "root";
+    if (degree === 3) return "3rd";
+    if (degree === 5) return "5th";
+    if (degree === 7) return "7th";
+    if (rootSemi !== undefined && noteSemi !== undefined) {
+        const interval = (noteSemi - rootSemi + 12) % 12;
+        return SEMI_TO_INTERVAL[interval] || "?";
+    }
+    return "?";
+}
+
+/** Re-derive note degrees and scale_degrees on a measure for a given chord. */
+function recolorMeasure(measure, chord) {
+    const ctMap = buildChordToneMap(chord);
+    const rootSemi = PC_TO_SEMI[chord.root];
+
+    for (const beat of measure.beats) {
+        for (const note of beat.notes) {
+            if (note.is_tied) continue;
+            const semi = note.midi % 12;
+            note.degree = ctMap[semi] || null;
+        }
+    }
+
+    const seenSemi = new Set();
+    const newDegrees = [];
+    for (const beat of measure.beats) {
+        for (const note of beat.notes) {
+            if (note.is_tied) continue;
+            const semi = note.midi % 12;
+            if (seenSemi.has(semi)) continue;
+            seenSemi.add(semi);
+            const deg = ctMap[semi] || null;
+            const pc = pitchClassFromName(note.pitch_name);
+            const label = chordToneLabel(deg, semi, rootSemi);
+            newDegrees.push(`${pc}=${label}`);
+        }
+    }
+    measure.scale_degrees = newDegrees;
+}
+
+// Major/minor scale intervals and degree labels for commentary generation
+const MAJOR_SEMITONES = [0, 2, 4, 5, 7, 9, 11];
+const MINOR_SEMITONES = [0, 2, 3, 5, 7, 8, 10];
+const MAJOR_DEGREE_LABELS = ["I", "II", "III", "IV", "V", "VI", "VII"];
+const MINOR_DEGREE_LABELS = ["i", "ii", "III", "iv", "v", "VI", "VII"];
+
+/** Parse a key string like "B minor" → { tonic: "B", mode: "minor" } */
+function parseKeyString(keyStr) {
+    if (!keyStr) return null;
+    const parts = keyStr.split(" ");
+    if (parts.length < 2) return null;
+    return { tonic: parts[0], mode: parts[1] };
+}
+
+/** Get the scale degree label of a pitch class in a key (e.g. "i", "III"). */
+function scaleDegreeInKey(pc, keyStr) {
+    const k = parseKeyString(keyStr);
+    if (!k) return null;
+    const tonicSemi = PC_TO_SEMI[k.tonic];
+    const pcSemi = PC_TO_SEMI[pc];
+    if (tonicSemi === undefined || pcSemi === undefined) return null;
+    const interval = (pcSemi - tonicSemi + 12) % 12;
+    const semitones = k.mode === "minor" ? MINOR_SEMITONES : MAJOR_SEMITONES;
+    const labels = k.mode === "minor" ? MINOR_DEGREE_LABELS : MAJOR_DEGREE_LABELS;
+    const idx = semitones.indexOf(interval);
+    return idx >= 0 ? labels[idx] : null;
+}
+
+/** Generate client-side commentary for a chord in context of a measure. */
+function generateCommentary(chord, measure) {
+    const parts = [];
+    const ctMap = buildChordToneMap(chord);
+    const rootSemi = PC_TO_SEMI[chord.root];
+
+    // Collect unique pitch classes in order
+    const seenPcs = new Set();
+    const pcs = [];
+    for (const beat of measure.beats) {
+        for (const note of beat.notes) {
+            if (note.is_tied) continue;
+            const pc = pitchClassFromName(note.pitch_name);
+            if (!seenPcs.has(pc)) {
+                seenPcs.add(pc);
+                pcs.push({ name: pc, semi: note.midi % 12 });
+            }
+        }
+    }
+    if (pcs.length === 0) return "Rest measure.";
+
+    // Chord tone breakdown
+    const toneLabels = pcs.map((p) => {
+        const deg = ctMap[p.semi] || null;
+        const label = chordToneLabel(deg, p.semi, rootSemi);
+        return `${p.name}=${label}`;
+    });
+    parts.push(`${chord.name}: ${toneLabels.join(", ")}.`);
+
+    // Count chord tones vs non-chord tones
+    const chordToneCount = pcs.filter((p) => ctMap[p.semi]).length;
+    const nonChordTones = pcs.filter((p) => !ctMap[p.semi]);
+    if (nonChordTones.length > 0) {
+        const nctNames = nonChordTones.map((p) => p.name).join(", ");
+        parts.push(`${chordToneCount}/${pcs.length} pitches are chord tones; ${nctNames} ${nonChordTones.length === 1 ? "is a" : "are"} non-chord ${nonChordTones.length === 1 ? "tone" : "tones"}.`);
+    } else {
+        parts.push(`All ${pcs.length} pitches are chord tones.`);
+    }
+
+    // Roman numeral + key relationship
+    const globalKey = measure.global_key;
+    const rn = chord.roman_numeral;
+    if (globalKey && rn) {
+        const rootDeg = scaleDegreeInKey(chord.root, globalKey);
+        if (rootDeg) {
+            parts.push(`${rn} in ${globalKey} \u2014 ${chord.root} is ${rootDeg}.`);
+        } else {
+            parts.push(`${rn} in ${globalKey}.`);
+        }
+    }
+
+    // Quality notes
+    const name = chord.name.toLowerCase();
+    if (name.includes("dim")) {
+        parts.push("Diminished quality creates tension, typically resolving stepwise.");
+    } else if (name.includes("aug")) {
+        parts.push("Augmented quality creates instability, pulling toward resolution.");
+    }
+
+    return parts.join(" ");
+}
+
 let analysisData = null;
-let currentTrack = null; // track currently being displayed
 let measureCounter = 0; // unique IDs for VexFlow containers
 
 // Auto-load demo on page load
@@ -387,17 +552,19 @@ function switchToAlternative(track, measureIdx, altIdx) {
 
     // Swap: current primary becomes an alternative, clicked alternative becomes primary
     const oldPrimary = m.chords[0];
-    // Remove clicked alt from alternatives, add old primary
     const newAlts = m.chord_alternatives.filter((_, i) => i !== altIdx);
     if (oldPrimary) {
         newAlts.push(oldPrimary);
-        // Sort by confidence descending
         newAlts.sort((a, b) => b.confidence - a.confidence);
     }
     m.chords = [alt];
     m.chord_alternatives = newAlts;
     m.roman_numerals = [alt.roman_numeral || "?"];
 
-    // Re-render the entire track (simplest way to refresh notation + tab + coloring)
+    // Re-derive note degrees, scale degrees, colors, and commentary
+    recolorMeasure(m, alt);
+    m.commentary = generateCommentary(alt, m);
+
+    // Re-render the entire track
     renderMeasures(track);
 }
