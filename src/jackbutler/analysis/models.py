@@ -24,6 +24,8 @@ class MeasureAnalysis(BaseModel):
     roman_numerals: list[str] = []
     scale_degrees: list[str] = []  # e.g. ["A=i", "C=III", "D=iv"]
     commentary: str = ""
+    harmonic_desc: str = ""
+    melodic_desc: str = ""
     beats: list[ParsedBeat] = []
     note_names: list[str] = []
 

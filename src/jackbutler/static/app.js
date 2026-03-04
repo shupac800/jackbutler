@@ -302,6 +302,90 @@ function generateCommentary(chord, measure) {
     return parts.join(" ");
 }
 
+/** Generate a one-line harmonic description for a chord. */
+function generateHarmonicDesc(chord, measure) {
+    let desc = chord.name;
+    const rn = chord.roman_numeral;
+    const gk = measure.global_key;
+    if (rn && gk) {
+        desc += ` \u2014 ${rn} in ${gk}`;
+    }
+    return desc;
+}
+
+/** Generate a melodic description analyzing pitch motion. */
+function generateMelodicDesc(chord, measure) {
+    // Extract ordered MIDI values (highest per beat, non-tied)
+    const seq = [];
+    for (const beat of measure.beats) {
+        const candidates = beat.notes.filter((n) => !n.is_tied).map((n) => n.midi);
+        if (candidates.length > 0) seq.push(Math.max(...candidates));
+    }
+    if (seq.length === 0) return "";
+    if (seq.length === 1) {
+        return `single note ${pitchName(seq[0])}`;
+    }
+
+    // Repeated note check
+    if (new Set(seq).size === 1) {
+        return `repeated ${pitchName(seq[0])}`;
+    }
+
+    // Contour
+    const diffs = [];
+    for (let i = 0; i < seq.length - 1; i++) diffs.push(seq[i + 1] - seq[i]);
+    const ups = diffs.filter((d) => d > 0).length;
+    const downs = diffs.filter((d) => d < 0).length;
+    let contour;
+    if (downs === 0) contour = "ascending";
+    else if (ups === 0) contour = "descending";
+    else {
+        const peakIdx = seq.indexOf(Math.max(...seq));
+        const valleyIdx = seq.indexOf(Math.min(...seq));
+        if (peakIdx > 0 && peakIdx < seq.length - 1 && ups >= downs) contour = "ascending\u2013descending";
+        else if (valleyIdx > 0 && valleyIdx < seq.length - 1 && downs >= ups) contour = "descending\u2013ascending";
+        else if (ups > downs) contour = "ascending";
+        else if (downs > ups) contour = "descending";
+        else contour = "undulating";
+    }
+
+    // Chord tones
+    const chordPcs = new Set(chord.midi_pitches.map((p) => p % 12));
+    const seqPcs = seq.map((m) => m % 12);
+
+    // Arpeggio check
+    if (seq.length >= 2) {
+        const ctCount = seqPcs.filter((pc) => chordPcs.has(pc)).length;
+        if (ctCount / seqPcs.length >= 0.75) {
+            const nonCt = [];
+            for (let i = 0; i < seqPcs.length; i++) {
+                if (!chordPcs.has(seqPcs[i])) nonCt.push(pitchName(seq[i]));
+            }
+            let label = `${chord.name} arpeggio`;
+            if (contour !== "static") label += ` (${contour})`;
+            if (nonCt.length > 0) label += ` with passing tone${nonCt.length > 1 ? "s" : ""} ${nonCt.join(", ")}`;
+            return label;
+        }
+    }
+
+    // Scale run check
+    if (seq.length >= 3) {
+        const intervals = [];
+        for (let i = 0; i < seq.length - 1; i++) intervals.push(Math.abs(seq[i + 1] - seq[i]));
+        if (intervals.every((iv) => iv >= 1 && iv <= 2)) {
+            return contour !== "static" && contour !== "undulating" ? `${contour} scale run` : "scale run";
+        }
+    }
+
+    return `${chord.name} figuration (${contour})`;
+}
+
+/** Get pitch name from MIDI number. */
+function pitchName(midi) {
+    const names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    return names[midi % 12];
+}
+
 let analysisData = null;
 let measureCounter = 0; // unique IDs for VexFlow containers
 
@@ -648,8 +732,18 @@ function renderMeasures(track) {
             html += `</div>`;
         }
 
-        // Commentary
-        if (m.commentary) {
+        // Commentary (split into harmonic + melodic)
+        if (m.harmonic_desc || m.melodic_desc) {
+            html += `<div class="commentary">`;
+            if (m.harmonic_desc) {
+                html += `<span class="commentary-label">Harmonic:</span> ${m.harmonic_desc}`;
+                if (m.melodic_desc) html += `<br>`;
+            }
+            if (m.melodic_desc) {
+                html += `<span class="commentary-label">Melodic:</span> ${m.melodic_desc}`;
+            }
+            html += `</div>`;
+        } else if (m.commentary) {
             html += `<div class="commentary">${m.commentary}</div>`;
         }
 
@@ -726,6 +820,8 @@ function switchToAlternative(track, measureIdx, altIdx) {
     // Re-derive note degrees, scale degrees, colors, and commentary
     recolorMeasure(m, alt);
     m.commentary = generateCommentary(alt, m);
+    m.harmonic_desc = generateHarmonicDesc(alt, m);
+    m.melodic_desc = generateMelodicDesc(alt, m);
 
     // Re-render the entire track
     renderMeasures(track);

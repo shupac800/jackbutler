@@ -105,6 +105,112 @@ def _chord_commentary(
     return parts
 
 
+def _pitch_sequence(measure: ParsedMeasure) -> list[int]:
+    """Get ordered MIDI values of non-tied notes (highest per beat)."""
+    seq: list[int] = []
+    for beat in measure.beats:
+        candidates = [n.midi for n in beat.notes if not n.is_tied]
+        if candidates:
+            seq.append(max(candidates))
+    return seq
+
+
+def _detect_contour(midi_seq: list[int]) -> str:
+    """Classify pitch contour as ascending, descending, arch, valley, or static."""
+    if len(midi_seq) <= 1:
+        return "static"
+    if len(set(midi_seq)) == 1:
+        return "static"
+
+    diffs = [midi_seq[i + 1] - midi_seq[i] for i in range(len(midi_seq) - 1)]
+    ups = sum(1 for d in diffs if d > 0)
+    downs = sum(1 for d in diffs if d < 0)
+
+    if downs == 0:
+        return "ascending"
+    if ups == 0:
+        return "descending"
+
+    # Check for arch (up then down) or valley (down then up)
+    peak_idx = midi_seq.index(max(midi_seq))
+    valley_idx = midi_seq.index(min(midi_seq))
+
+    if 0 < peak_idx < len(midi_seq) - 1 and ups >= downs:
+        return "ascending\u2013descending"
+    if 0 < valley_idx < len(midi_seq) - 1 and downs >= ups:
+        return "descending\u2013ascending"
+
+    if ups > downs:
+        return "ascending"
+    if downs > ups:
+        return "descending"
+    return "undulating"
+
+
+def _melodic_description(measure: ParsedMeasure, chord_info: ChordInfo | None) -> str:
+    """Analyze the sequence of pitches to describe melodic motion."""
+    midi_seq = _pitch_sequence(measure)
+    if not midi_seq:
+        return ""
+    if len(midi_seq) == 1:
+        note_name = m21pitch.Pitch(midi=midi_seq[0]).name
+        return f"single note {note_name}"
+
+    contour = _detect_contour(midi_seq)
+
+    # Check for repeated notes
+    if len(set(midi_seq)) == 1:
+        note_name = m21pitch.Pitch(midi=midi_seq[0]).name
+        return f"repeated {note_name}"
+
+    chord_name = chord_info.name if chord_info else None
+    chord_pcs: set[int] = set()
+    if chord_info:
+        chord_pcs = {p % 12 for p in chord_info.midi_pitches}
+
+    seq_pcs = [m % 12 for m in midi_seq]
+
+    # Detect arpeggio: ≥75% chord tones
+    if chord_pcs and len(midi_seq) >= 2:
+        ct_count = sum(1 for pc in seq_pcs if pc in chord_pcs)
+        if ct_count / len(seq_pcs) >= 0.75:
+            non_ct = [
+                m21pitch.Pitch(midi=midi_seq[i]).name
+                for i, pc in enumerate(seq_pcs)
+                if pc not in chord_pcs
+            ]
+            label = f"{chord_name} arpeggio"
+            if contour != "static":
+                label += f" ({contour})"
+            if non_ct:
+                label += f" with passing tone{'s' if len(non_ct) > 1 else ''} {', '.join(non_ct)}"
+            return label
+
+    # Detect scale run: all consecutive intervals are 1-2 semitones
+    if len(midi_seq) >= 3:
+        intervals = [abs(midi_seq[i + 1] - midi_seq[i]) for i in range(len(midi_seq) - 1)]
+        if all(1 <= iv <= 2 for iv in intervals):
+            label = f"{contour} scale run" if contour not in ("static", "undulating") else "scale run"
+            return label
+
+    # Fallback
+    if chord_name:
+        return f"{chord_name} figuration ({contour})" if contour != "static" else f"{chord_name} figuration"
+    return f"melodic line ({contour})" if contour != "static" else "melodic line"
+
+
+def _harmonic_description(
+    chord_info: ChordInfo,
+    numeral: str | None,
+    global_key: m21key.Key | None,
+) -> str:
+    """One-line harmonic summary: chord name + roman numeral in key."""
+    parts = [chord_info.name]
+    if numeral and global_key:
+        parts.append(f"\u2014 {numeral} in {_key_name(global_key)}")
+    return " ".join(parts)
+
+
 class CommentaryGenerator(BaseAnalyzer):
     """Generate human-readable explanation of the harmonic content."""
 
@@ -119,49 +225,81 @@ class CommentaryGenerator(BaseAnalyzer):
         confidence = context.get("key_confidence", 0) or 0
 
         if not pcs:
-            return {"commentary": "Rest measure."}
+            return {
+                "commentary": "Rest measure.",
+                "harmonic_desc": "",
+                "melodic_desc": "",
+            }
+
+        harmonic_desc = ""
+        chord_for_melody = chords[0] if chords else None
 
         # When chords are detected, lead with chord-based commentary
         if chords:
             for i, chord_info in enumerate(chords):
                 numeral = numerals[i] if i < len(numerals) else None
                 parts.extend(_chord_commentary(chord_info, numeral, pcs, global_key))
-            return {"commentary": " ".join(parts)}
+            harmonic_desc = _harmonic_description(
+                chords[0],
+                numerals[0] if numerals else None,
+                global_key,
+            )
+        else:
+            # No chords detected — fall back to key-based analysis
+            ref_key = global_key or measure_key
+            if ref_key is None:
+                melodic_desc = _melodic_description(measure, None)
+                commentary = f"Notes: {', '.join(pcs)}."
+                if melodic_desc:
+                    commentary += f" {melodic_desc.capitalize()}."
+                return {
+                    "commentary": commentary,
+                    "harmonic_desc": "",
+                    "melodic_desc": melodic_desc,
+                }
 
-        # No chords detected — fall back to key-based analysis
-        ref_key = global_key or measure_key
-        if ref_key is None:
-            return {"commentary": f"Notes: {', '.join(pcs)}."}
+            ref_key_name = _key_name(ref_key)
+            breakdown, in_key_count = degree_analysis_for_key(pcs, ref_key)
+            out_of_key = [pc for pc, label, _ in breakdown if label is None]
 
-        ref_key_name = _key_name(ref_key)
-        breakdown, in_key_count = degree_analysis_for_key(pcs, ref_key)
-        out_of_key = [pc for pc, label, _ in breakdown if label is None]
+            parts.append(f"In {ref_key_name}: {_format_degrees(breakdown)}.")
 
-        parts.append(f"In {ref_key_name}: {_format_degrees(breakdown)}.")
+            if pcs:
+                fit_pct = in_key_count / len(pcs)
+                if fit_pct == 1.0:
+                    parts.append(f"All {len(pcs)} pitches diatonic.")
+                elif fit_pct >= 0.75:
+                    parts.append(
+                        f"{in_key_count}/{len(pcs)} diatonic; "
+                        f"{', '.join(out_of_key)} chromatic."
+                    )
+                else:
+                    parts.append(
+                        f"Only {in_key_count}/{len(pcs)} diatonic. "
+                        f"Chromatic tones ({', '.join(out_of_key)}) suggest "
+                        f"borrowed chords or modulation."
+                    )
 
-        if pcs:
-            fit_pct = in_key_count / len(pcs)
-            if fit_pct == 1.0:
-                parts.append(f"All {len(pcs)} pitches diatonic.")
-            elif fit_pct >= 0.75:
-                parts.append(
-                    f"{in_key_count}/{len(pcs)} diatonic; "
-                    f"{', '.join(out_of_key)} chromatic."
-                )
-            else:
-                parts.append(
-                    f"Only {in_key_count}/{len(pcs)} diatonic. "
-                    f"Chromatic tones ({', '.join(out_of_key)}) suggest "
-                    f"borrowed chords or modulation."
-                )
+            # Tonal anchors
+            has_root = any(d == 1 for _, _, d in breakdown)
+            has_fifth = any(d == 5 for _, _, d in breakdown)
+            has_third = any(d == 3 for _, _, d in breakdown)
+            if has_root and has_fifth and has_third:
+                parts.append("Tonic triad present (root + 3rd + 5th).")
+            elif has_root and has_fifth:
+                parts.append("Root + 5th present.")
 
-        # Tonal anchors
-        has_root = any(d == 1 for _, _, d in breakdown)
-        has_fifth = any(d == 5 for _, _, d in breakdown)
-        has_third = any(d == 3 for _, _, d in breakdown)
-        if has_root and has_fifth and has_third:
-            parts.append("Tonic triad present (root + 3rd + 5th).")
-        elif has_root and has_fifth:
-            parts.append("Root + 5th present.")
+            harmonic_desc = f"In {ref_key_name}"
 
-        return {"commentary": " ".join(parts)}
+        melodic_desc = _melodic_description(measure, chord_for_melody)
+        harmonic_text = " ".join(parts)
+        if melodic_desc:
+            commentary = f"{harmonic_text} {melodic_desc.capitalize()}."
+        else:
+            commentary = harmonic_text
+
+        return {
+            "commentary": commentary,
+            "harmonic_desc": harmonic_desc,
+            "melodic_desc": melodic_desc,
+        }

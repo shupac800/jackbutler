@@ -28,7 +28,7 @@ header h1 {
 }
 
 main {
-    max-width: 900px;
+    max-width: 1400px;
     margin: 0 auto;
     padding: 1rem;
 }
@@ -192,7 +192,7 @@ main {
     align-items: flex-start;
     gap: 1rem;
     margin-bottom: 0.75rem;
-    overflow-x: auto;
+    flex-wrap: wrap;
 }
 
 .notation-pane {
@@ -309,6 +309,14 @@ main {
     background: #141414;
     border-left: 3px solid #f0c040;
     border-radius: 0 4px 4px 0;
+}
+
+.commentary-label {
+    color: #f0c040;
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 
 /* Chord confidence in badge */
