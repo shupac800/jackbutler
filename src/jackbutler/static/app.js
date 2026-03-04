@@ -243,7 +243,13 @@ function renderMeasures(track) {
         html += `<span class="time-sig">${m.time_sig}</span>`;
         const hasChords = m.chords && m.chords.length > 0;
         if (hasChords) {
-            html += `<span class="chord-badge">${m.chords.map((c) => c.name).join(" ")}</span>`;
+            m.chords.forEach((c, i) => {
+                const rn = m.roman_numerals && m.roman_numerals[i];
+                if (rn) {
+                    html += `<span class="numeral-badge">${rn}</span>`;
+                }
+                html += `<span class="chord-badge">${c.name}</span>`;
+            });
         }
         if (m.detected_key && !hasChords) {
             const lowConf = m.key_confidence !== null && m.key_confidence < 0.8;
