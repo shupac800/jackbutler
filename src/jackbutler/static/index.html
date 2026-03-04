@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jack Butler — Guitar Pro Analyzer</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <h1>Jack Butler</h1>
+        <p class="subtitle">Guitar Pro Music Theory Analyzer</p>
+    </header>
+
+    <main>
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Analyzing Tears In The Rain...</p>
+        </div>
+
+        <div id="error" class="error hidden"></div>
+
+        <div id="results" class="hidden">
+            <div class="song-header">
+                <h2 id="song-title"></h2>
+                <p id="song-artist"></p>
+            </div>
+
+            <div id="track-tabs" class="track-tabs"></div>
+            <div id="measures" class="measures"></div>
+        </div>
+    </main>
+
+    <script src="https://unpkg.com/vexflow@4.2.5/build/cjs/vexflow.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
