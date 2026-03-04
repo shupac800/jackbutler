@@ -1,4 +1,4 @@
-from music21 import key as m21key, pitch as m21pitch
+from music21 import chord as m21chord, key as m21key, pitch as m21pitch
 
 from jackbutler.analysis.base import BaseAnalyzer
 from jackbutler.analysis.key_analyzer import (
@@ -36,8 +36,68 @@ def _key_name(k: m21key.Key) -> str:
     return f"{k.tonic.name} {k.mode}"
 
 
+def _chord_tone_label(pc: str, chord: m21chord.Chord) -> str | None:
+    """Return a chord-tone label like 'root', 'b3', '5th' for a pitch class."""
+    try:
+        root_name = chord.root().name
+    except Exception:
+        return None
+    if pc == root_name:
+        return "root"
+    third = chord.third
+    if third and pc == third.name:
+        return "b3" if chord.quality in ("diminished", "minor") else "3rd"
+    fifth = chord.fifth
+    if fifth and pc == fifth.name:
+        return "b5" if chord.quality == "diminished" else "5th"
+    seventh = chord.seventh
+    if seventh and pc == seventh.name:
+        return "7th"
+    return None
+
+
+def _chord_commentary(
+    chord_info: ChordInfo,
+    numeral: str | None,
+    pcs: list[str],
+    global_key: m21key.Key | None,
+) -> list[str]:
+    """Generate commentary focused on the detected chord."""
+    parts: list[str] = []
+    c = m21chord.Chord(chord_info.midi_pitches)
+
+    # Describe chord tones
+    tone_parts = []
+    for pc in pcs:
+        label = _chord_tone_label(pc, c)
+        if label:
+            tone_parts.append(f"{pc}={label}")
+        else:
+            tone_parts.append(f"{pc}=passing")
+    parts.append(f"{chord_info.name}: {', '.join(tone_parts)}.")
+
+    # Explain relationship to global key
+    if global_key and numeral:
+        root_degree = get_scale_degree_label(chord_info.root, global_key)
+        key_name = _key_name(global_key)
+        if root_degree:
+            parts.append(
+                f"{numeral} in {key_name} \u2014 "
+                f"{chord_info.root} is {root_degree}."
+            )
+
+    # Note quality
+    quality = c.quality
+    if quality == "diminished":
+        parts.append("Diminished quality creates tension, typically resolving stepwise.")
+    elif quality == "augmented":
+        parts.append("Augmented quality creates instability, pulling toward resolution.")
+
+    return parts
+
+
 class CommentaryGenerator(BaseAnalyzer):
-    """Generate human-readable explanation of why a key/mode was assigned."""
+    """Generate human-readable explanation of the harmonic content."""
 
     def analyze_measure(self, measure: ParsedMeasure, context: dict) -> dict:
         parts: list[str] = []
@@ -45,12 +105,21 @@ class CommentaryGenerator(BaseAnalyzer):
 
         global_key: m21key.Key | None = context.get("global_key")
         measure_key: m21key.Key | None = context.get("key_result")
-        alternatives: list[m21key.Key] = context.get("key_alternatives", [])
+        chords: list[ChordInfo] = context.get("chords", [])
+        numerals: list[str] = context.get("roman_numerals", [])
         confidence = context.get("key_confidence", 0) or 0
 
         if not pcs:
             return {"commentary": "Rest measure."}
 
+        # When chords are detected, lead with chord-based commentary
+        if chords:
+            for i, chord_info in enumerate(chords):
+                numeral = numerals[i] if i < len(numerals) else None
+                parts.extend(_chord_commentary(chord_info, numeral, pcs, global_key))
+            return {"commentary": " ".join(parts)}
+
+        # No chords detected — fall back to key-based analysis
         ref_key = global_key or measure_key
         if ref_key is None:
             return {"commentary": f"Notes: {', '.join(pcs)}."}
@@ -59,10 +128,8 @@ class CommentaryGenerator(BaseAnalyzer):
         breakdown, in_key_count = degree_analysis_for_key(pcs, ref_key)
         out_of_key = [pc for pc, label, _ in breakdown if label is None]
 
-        # 1. Primary analysis in the global key
         parts.append(f"In {ref_key_name}: {_format_degrees(breakdown)}.")
 
-        # 2. Fit quality
         if pcs:
             fit_pct = in_key_count / len(pcs)
             if fit_pct == 1.0:
@@ -79,72 +146,7 @@ class CommentaryGenerator(BaseAnalyzer):
                     f"borrowed chords or modulation."
                 )
 
-        # 3. Low-confidence alternative analysis
-        #    When the per-measure detection is uncertain, show how the notes
-        #    fit other plausible keys and explain why we still lean toward one.
-        if confidence < 0.7 and alternatives:
-            alt_analyses = []
-            for alt_key in alternatives[:4]:
-                alt_name = _key_name(alt_key)
-                if alt_name == ref_key_name:
-                    continue
-                alt_bd, alt_diatonic = degree_analysis_for_key(pcs, alt_key)
-                alt_conf = round(alt_key.correlationCoefficient, 2)
-                alt_degs = _format_degrees(alt_bd)
-                alt_analyses.append((alt_name, alt_diatonic, alt_degs, alt_conf))
-
-            if alt_analyses:
-                # Show alternatives that fit well
-                parts.append(
-                    f"Low confidence ({confidence:.0%}) \u2014 alternative readings:"
-                )
-                for alt_name, alt_dia, alt_degs, alt_conf in alt_analyses:
-                    fit_note = (
-                        f"all diatonic"
-                        if alt_dia == len(pcs)
-                        else f"{alt_dia}/{len(pcs)} diatonic"
-                    )
-                    parts.append(
-                        f"  {alt_name} ({alt_conf:.0%}): {alt_degs} ({fit_note})."
-                    )
-
-                # Explain why we stick with the global key
-                if global_key and measure_key:
-                    measure_key_name = _key_name(measure_key)
-                    if measure_key_name != ref_key_name:
-                        tonic_degree = get_scale_degree_label(
-                            measure_key.tonic.name, global_key
-                        )
-                        if tonic_degree:
-                            parts.append(
-                                f"Assigned {ref_key_name} based on surrounding context "
-                                f"(local pull toward {measure_key_name} \u2014 "
-                                f"{measure_key.tonic.name} is {tonic_degree})."
-                            )
-                        else:
-                            parts.append(
-                                f"Assigned {ref_key_name} based on surrounding context "
-                                f"despite local pull toward {measure_key_name}."
-                            )
-                    else:
-                        parts.append(
-                            f"Context confirms {ref_key_name} despite ambiguity."
-                        )
-
-        # 4. High-confidence: simpler key-drift note
-        elif measure_key and global_key and confidence >= 0.7:
-            measure_key_name = _key_name(measure_key)
-            if measure_key_name != ref_key_name:
-                tonic_degree = get_scale_degree_label(
-                    measure_key.tonic.name, global_key
-                )
-                if tonic_degree:
-                    parts.append(
-                        f"Local pull toward {measure_key_name} "
-                        f"({measure_key.tonic.name} is {tonic_degree} in {ref_key_name})."
-                    )
-
-        # 5. Tonal anchors
+        # Tonal anchors
         has_root = any(d == 1 for _, _, d in breakdown)
         has_fifth = any(d == 5 for _, _, d in breakdown)
         has_third = any(d == 3 for _, _, d in breakdown)
@@ -152,12 +154,5 @@ class CommentaryGenerator(BaseAnalyzer):
             parts.append("Tonic triad present (root + 3rd + 5th).")
         elif has_root and has_fifth:
             parts.append("Root + 5th present.")
-
-        # 6. Chords / Roman numerals if present
-        chords: list[ChordInfo] = context.get("chords", [])
-        numerals: list[str] = context.get("roman_numerals", [])
-        if chords and numerals:
-            chord_rn = [f"{c.name} ({rn})" for c, rn in zip(chords, numerals)]
-            parts.append(f"Chords: {', '.join(chord_rn)}.")
 
         return {"commentary": " ".join(parts)}

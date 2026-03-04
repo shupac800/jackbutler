@@ -241,10 +241,11 @@ function renderMeasures(track) {
         html += `<div class="measure-header">`;
         html += `<span class="measure-number">M${m.measure_number}</span>`;
         html += `<span class="time-sig">${m.time_sig}</span>`;
-        if (m.chords && m.chords.length > 0) {
+        const hasChords = m.chords && m.chords.length > 0;
+        if (hasChords) {
             html += `<span class="chord-badge">${m.chords.map((c) => c.name).join(" ")}</span>`;
         }
-        if (m.detected_key) {
+        if (m.detected_key && !hasChords) {
             const lowConf = m.key_confidence !== null && m.key_confidence < 0.8;
             const matchesGlobal = m.detected_key === m.global_key;
             html += `<span class="key-badge${lowConf ? " low-confidence" : ""}">${m.detected_key}`;
@@ -302,17 +303,8 @@ function renderMeasures(track) {
             html += `</div>`;
         }
 
-        // Chords
-        if (m.chords && m.chords.length > 0) {
-            html += `<div class="chords-row"><span class="row-label">Chords:</span> `;
-            m.chords.forEach((c) => {
-                html += `<span>${c.name}</span>`;
-            });
-            html += `</div>`;
-        }
-
-        // Roman numerals
-        if (m.roman_numerals && m.roman_numerals.length > 0) {
+        // Roman numerals (only when no chord badge in header)
+        if (!hasChords && m.roman_numerals && m.roman_numerals.length > 0) {
             html += `<div class="roman-row"><span class="row-label">Progression:</span> `;
             m.roman_numerals.forEach((rn) => {
                 html += `<span>${rn}</span>`;
