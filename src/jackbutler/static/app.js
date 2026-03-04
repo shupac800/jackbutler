@@ -1,3 +1,56 @@
+// --- Audio engine ---
+let audioCtx = null;
+
+function getAudioContext() {
+    if (!audioCtx) audioCtx = new AudioContext();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    return audioCtx;
+}
+
+function playNote(ctx, midi, startTime, duration) {
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(0.25, startTime + 0.01);
+    gain.gain.setValueAtTime(0.25, startTime + Math.min(duration * 0.6, duration - 0.05));
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.value = freq;
+    osc1.connect(gain);
+    osc1.start(startTime);
+    osc1.stop(startTime + duration);
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = "triangle";
+    osc2.frequency.value = freq;
+    osc2.detune.value = 3;
+    osc2.connect(gain);
+    osc2.start(startTime);
+    osc2.stop(startTime + duration);
+}
+
+function playMeasure(measure, tempo) {
+    tempo = tempo || 120;
+    const ctx = getAudioContext();
+    const now = ctx.currentTime + 0.05;
+    let maxEnd = 0;
+
+    for (const beat of measure.beats) {
+        const beatStart = now + (beat.start - 1) * 60 / tempo;
+        for (const note of beat.notes) {
+            if (note.is_tied) continue;
+            const dur = beat.duration * 60 / tempo;
+            playNote(ctx, note.midi, beatStart, dur);
+            const end = beatStart + dur - now;
+            if (end > maxEnd) maxEnd = end;
+        }
+    }
+    return maxEnd;
+}
+
 const loading = document.getElementById("loading");
 const errorEl = document.getElementById("error");
 const results = document.getElementById("results");
@@ -499,6 +552,7 @@ function renderMeasures(track) {
         // Header row
         html += `<div class="measure-header">`;
         html += `<span class="measure-number">M${m.measure_number}</span>`;
+        html += `<button class="play-btn" data-measure-idx="${mIdx}">&#9654;</button>`;
         html += `<span class="time-sig">${m.time_sig}</span>`;
         const hasChords = m.chords && m.chords.length > 0;
         if (hasChords) {
@@ -632,6 +686,18 @@ function renderMeasures(track) {
             const mi = parseInt(row.dataset.measureIdx, 10);
             const ai = parseInt(row.dataset.altIdx, 10);
             switchToAlternative(track, mi, ai);
+        });
+    });
+
+    // Attach click handlers for play buttons
+    measuresEl.querySelectorAll(".play-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+            const mi = parseInt(btn.dataset.measureIdx, 10);
+            const m = track.measures[mi];
+            if (!m) return;
+            const duration = playMeasure(m);
+            btn.classList.add("playing");
+            setTimeout(() => btn.classList.remove("playing"), duration * 1000);
         });
     });
 }
