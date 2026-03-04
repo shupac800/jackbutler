@@ -34,13 +34,14 @@ function durationToVex(quarterLen) {
     return "32";
 }
 
-// Convert pitch_name like "C#4" to VexFlow key format "C#/4"
+// Convert pitch_name like "C#4" to VexFlow key format "C#/5"
+// Guitar is a transposing instrument: notation is written one octave higher than sounding pitch.
 function pitchToVexKey(pitchName) {
     // pitchName is like "A3", "C#4", "G-4" (music21 uses - for flat)
     const match = pitchName.match(/^([A-G][#\-b]?)(\d+)$/);
     if (!match) return "C/4";
     let noteName = match[1].replace("-", "b");
-    const octave = match[2];
+    const octave = parseInt(match[2], 10) + 1;
     return noteName + "/" + octave;
 }
 
