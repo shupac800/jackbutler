@@ -127,24 +127,46 @@ function buildTab(measure, stringCount) {
 
     if (columns.length === 0) return null;
 
-    // Build HTML lines with colored spans
-    const lines = [];
+    // SVG dimensions
+    const lineSpacing = 20;
+    const topPad = 12;
+    const leftPad = 20;  // space for string labels
+    const rightPad = 10;
+    const colWidth = 28;
+    const svgWidth = leftPad + columns.length * colWidth + rightPad;
+    const svgHeight = topPad + (numStrings - 1) * lineSpacing + 12;
+    const lineColor = "#666";
+    const bgColor = "#111";
+
+    let svg = `<svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">`;
+
+    // String lines and labels
     for (let s = 0; s < numStrings; s++) {
-        let line = labels[s] + "|";
-        for (const col of columns) {
-            const cell = col[s];
-            if (cell === null) {
-                line += "--";
-            } else {
-                const color = degreeColor(cell.degree);
-                const pad = cell.text.length === 1 ? "-" : "";
-                line += `<span style="color:${color}">${cell.text}</span>${pad}`;
-            }
-        }
-        line += "|";
-        lines.push(line);
+        const y = topPad + s * lineSpacing;
+        // String line
+        svg += `<line x1="${leftPad}" y1="${y}" x2="${svgWidth - rightPad}" y2="${y}" stroke="${lineColor}" stroke-width="1"/>`;
+        // String label
+        svg += `<text x="${leftPad - 4}" y="${y + 4}" text-anchor="end" fill="#888" font-size="11" font-family="monospace">${labels[s]}</text>`;
     }
-    return lines.join("\n");
+
+    // Fret numbers
+    for (let c = 0; c < columns.length; c++) {
+        const x = leftPad + (c + 0.5) * colWidth;
+        for (let s = 0; s < numStrings; s++) {
+            const cell = columns[c][s];
+            if (cell === null) continue;
+            const y = topPad + s * lineSpacing;
+            const color = degreeColor(cell.degree);
+            // Opaque background to mask the string line behind the number
+            const textWidth = cell.text.length * 8 + 4;
+            svg += `<rect x="${x - textWidth / 2}" y="${y - 9}" width="${textWidth}" height="18" fill="${bgColor}" rx="2"/>`;
+            // Fret number
+            svg += `<text x="${x}" y="${y + 6}" text-anchor="middle" fill="${color}" font-size="16" font-weight="bold" font-family="monospace">${cell.text}</text>`;
+        }
+    }
+
+    svg += `</svg>`;
+    return svg;
 }
 
 function renderNotation(containerId, measure, timeSig) {
@@ -267,11 +289,11 @@ function renderMeasures(track) {
         html += `</div>`;
 
         // Notation + Tab side by side
-        const tabText = buildTab(m, track.string_count);
+        const tabSvg = buildTab(m, track.string_count);
         html += `<div class="notation-tab-row">`;
         html += `<div class="notation-pane" id="${notationId}"></div>`;
-        if (tabText) {
-            html += `<pre class="tab-display">${tabText}</pre>`;
+        if (tabSvg) {
+            html += `<div class="tab-display">${tabSvg}</div>`;
         }
         html += `</div>`;
 
