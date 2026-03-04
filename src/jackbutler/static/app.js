@@ -1,5 +1,6 @@
 // --- Audio engine ---
 let audioCtx = null;
+let playbackTimer = null; // non-null while any measure is playing
 
 function getAudioContext() {
     if (!audioCtx) audioCtx = new AudioContext();
@@ -692,12 +693,16 @@ function renderMeasures(track) {
     // Attach click handlers for play buttons
     measuresEl.querySelectorAll(".play-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
+            if (playbackTimer) return; // block while another measure is playing
             const mi = parseInt(btn.dataset.measureIdx, 10);
             const m = track.measures[mi];
             if (!m) return;
             const duration = playMeasure(m);
             btn.classList.add("playing");
-            setTimeout(() => btn.classList.remove("playing"), duration * 1000);
+            playbackTimer = setTimeout(() => {
+                btn.classList.remove("playing");
+                playbackTimer = null;
+            }, duration * 1000);
         });
     });
 }
