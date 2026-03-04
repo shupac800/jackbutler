@@ -6,6 +6,43 @@ const songArtist = document.getElementById("song-artist");
 const trackTabs = document.getElementById("track-tabs");
 const measuresEl = document.getElementById("measures");
 
+// Global tooltip element
+const tooltip = document.createElement("div");
+tooltip.className = "note-tooltip hidden";
+document.body.appendChild(tooltip);
+
+function showTooltip(e, text) {
+    tooltip.innerHTML = text;
+    tooltip.classList.remove("hidden");
+    positionTooltip(e);
+}
+
+function positionTooltip(e) {
+    const x = e.clientX + 12;
+    const y = e.clientY - 8;
+    tooltip.style.left = x + "px";
+    tooltip.style.top = y + "px";
+}
+
+function hideTooltip() {
+    tooltip.classList.add("hidden");
+}
+
+/** Build tooltip HTML for a note given its pitch name and the measure context. */
+function noteTooltipHtml(pitchName, measure) {
+    const pc = pitchClassFromName(pitchName);
+    let label = "";
+    if (measure.scale_degrees) {
+        const match = measure.scale_degrees.find((d) => d.startsWith(pc + "="));
+        if (match) label = match.split("=")[1];
+    }
+    const color = label ? degreeColor(
+        { "root": 1, "3rd": 3, "5th": 5, "7th": 7 }[label]
+    ) : DEFAULT_NOTE_COLOR;
+    return `<span style="color:${color}">${pitchName}</span>` +
+        (label ? ` <span class="tip-label" style="color:${color}">${label}</span>` : "");
+}
+
 const STRING_LABELS = ["e", "B", "G", "D", "A", "E"];
 
 // Low-saturation colors for scale degrees
@@ -275,7 +312,7 @@ function buildTab(measure, stringCount) {
     const numStrings = stringCount || 6;
     const labels = STRING_LABELS.slice(0, numStrings);
 
-    // Build columns: each beat becomes a column with {fret, degree} per string
+    // Build columns: each beat becomes a column with {fret, degree, pitchName} per string
     const columns = [];
     for (const beat of measure.beats) {
         const col = new Array(numStrings).fill(null);
@@ -285,6 +322,8 @@ function buildTab(measure, stringCount) {
                 col[idx] = {
                     text: note.is_tied ? "~" : String(note.fret),
                     degree: note.degree,
+                    pitchName: note.pitch_name || "",
+                    isTied: note.is_tied,
                 };
             }
         }
@@ -315,7 +354,7 @@ function buildTab(measure, stringCount) {
         svg += `<text x="${leftPad - 4}" y="${y + 4}" text-anchor="end" fill="#888" font-size="11" font-family="monospace">${labels[s]}</text>`;
     }
 
-    // Fret numbers
+    // Fret numbers with tooltip hit targets
     for (let c = 0; c < columns.length; c++) {
         const x = leftPad + (c + 0.5) * colWidth;
         for (let s = 0; s < numStrings; s++) {
@@ -323,11 +362,18 @@ function buildTab(measure, stringCount) {
             if (cell === null) continue;
             const y = topPad + s * lineSpacing;
             const color = degreeColor(cell.degree);
-            // Opaque background to mask the string line behind the number
             const textWidth = cell.text.length * 8 + 4;
+            const tipAttr = (!cell.isTied && cell.pitchName) ? ` data-tip-pitch="${cell.pitchName}"` : "";
+            svg += `<g${tipAttr}>`;
+            // Opaque background to mask the string line behind the number
             svg += `<rect x="${x - textWidth / 2}" y="${y - 9}" width="${textWidth}" height="18" fill="${bgColor}" rx="2"/>`;
             // Fret number
             svg += `<text x="${x}" y="${y + 6}" text-anchor="middle" fill="${color}" font-size="16" font-weight="bold" font-family="monospace">${cell.text}</text>`;
+            // Wider transparent hit area for tooltip
+            if (tipAttr) {
+                svg += `<rect x="${x - 14}" y="${y - 10}" width="28" height="20" fill="transparent" pointer-events="all" class="tip-target"/>`;
+            }
+            svg += `</g>`;
         }
     }
 
@@ -354,6 +400,7 @@ function renderNotation(containerId, measure, timeSig) {
 
         // Build VexFlow notes from beat data, colored by scale degree
         const vexNotes = [];
+        const vexNoteMeta = []; // parallel array: pitch names for each StaveNote
         for (const beat of measure.beats) {
             const nonTied = beat.notes.filter((n) => !n.is_tied);
             if (nonTied.length === 0) continue;
@@ -373,6 +420,7 @@ function renderNotation(containerId, measure, timeSig) {
             sn.setFlagStyle({ fillStyle: stemColor, strokeStyle: stemColor });
 
             vexNotes.push(sn);
+            vexNoteMeta.push(nonTied.map((n) => n.pitch_name));
         }
 
         if (vexNotes.length === 0) return;
@@ -406,6 +454,28 @@ function renderNotation(containerId, measure, timeSig) {
                     node.setAttribute("fill", LIGHT);
                 }
             });
+
+            // Add tooltip overlay rects for each note
+            const ns = "http://www.w3.org/2000/svg";
+            for (let ni = 0; ni < vexNotes.length; ni++) {
+                try {
+                    const sn = vexNotes[ni];
+                    const bb = sn.getBoundingBox();
+                    const pitches = vexNoteMeta[ni] || [];
+                    if (!bb || pitches.length === 0) continue;
+                    const overlay = document.createElementNS(ns, "rect");
+                    overlay.setAttribute("x", bb.x);
+                    overlay.setAttribute("y", bb.y);
+                    overlay.setAttribute("width", bb.w);
+                    overlay.setAttribute("height", bb.h);
+                    overlay.setAttribute("fill", "transparent");
+                    overlay.setAttribute("stroke", "none");
+                    overlay.setAttribute("pointer-events", "all");
+                    overlay.classList.add("tip-target");
+                    overlay.dataset.tipPitches = pitches.join(",");
+                    svg.appendChild(overlay);
+                } catch (_) {}
+            }
         }
     } catch (e) {
         el.textContent = "(notation error)";
@@ -533,6 +603,27 @@ function renderMeasures(track) {
 
         // Render VexFlow notation after the DOM element exists
         renderNotation(notationId, m, m.time_sig);
+
+        // Attach tooltip handlers for tab fret numbers
+        card.querySelectorAll("[data-tip-pitch]").forEach((el) => {
+            el.addEventListener("mouseenter", (e) => {
+                const pitch = el.dataset.tipPitch;
+                if (pitch) showTooltip(e, noteTooltipHtml(pitch, m));
+            });
+            el.addEventListener("mousemove", positionTooltip);
+            el.addEventListener("mouseleave", hideTooltip);
+        });
+
+        // Attach tooltip handlers for VexFlow notation overlays
+        card.querySelectorAll("[data-tip-pitches]").forEach((el) => {
+            el.addEventListener("mouseenter", (e) => {
+                const pitches = el.dataset.tipPitches.split(",").filter(Boolean);
+                const html = pitches.map((p) => noteTooltipHtml(p, m)).join("<br>");
+                showTooltip(e, html);
+            });
+            el.addEventListener("mousemove", positionTooltip);
+            el.addEventListener("mouseleave", hideTooltip);
+        });
     });
 
     // Attach click handlers for alternative rows
