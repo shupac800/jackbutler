@@ -11,7 +11,7 @@ engine = AnalysisEngine()
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-TEARS_GP = PROJECT_ROOT / "tabs" / "tears.gp"
+DEFAULT_GP = PROJECT_ROOT / "tabs" / "lacatedral-allegro.gp"
 
 
 @router.get("/")
@@ -21,8 +21,8 @@ async def index():
 
 @router.get("/api/demo", response_model=AnalyzeResponse)
 async def demo():
-    contents = TEARS_GP.read_bytes()
-    song = GPParser.parse(contents, "tears.gp")
+    contents = DEFAULT_GP.read_bytes()
+    song = GPParser.parse(contents, "lacatedral-allegro.gp")
     analysis = engine.analyze(song)
     return analysis
 

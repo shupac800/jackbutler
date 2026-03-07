@@ -112,6 +112,27 @@ function degreeColor(degree) {
     return DEGREE_COLORS[degree] || DEFAULT_NOTE_COLOR;
 }
 
+// Map global key string (e.g. "B minor") to VexFlow key signature spec.
+// VexFlow expects the major key name; minor keys map to their relative major.
+const MINOR_TO_RELATIVE_MAJOR = {
+    "A": "C", "E": "G", "B": "D", "F#": "A", "C#": "E", "G#": "B", "D#": "F#",
+    "D": "F", "G": "Bb", "C": "Eb", "F": "Ab", "Bb": "Db", "Eb": "Gb",
+    // Enharmonic aliases
+    "A#": "C#", "Eb": "Gb",
+};
+
+function globalKeyToVexKeySig(globalKeyStr) {
+    if (!globalKeyStr) return null;
+    // Parse "B minor" or "D major" etc.
+    const parts = globalKeyStr.split(" ");
+    const tonic = parts[0];
+    const mode = parts[1] || "major";
+    if (mode === "minor") {
+        return MINOR_TO_RELATIVE_MAJOR[tonic] || null;
+    }
+    return tonic;
+}
+
 // Map quarter-note duration values to VexFlow duration strings
 // VexFlow durations: w=whole(4), h=half(2), q=quarter(1), 8=eighth(0.5), 16=sixteenth(0.25)
 function durationToVex(quarterLen) {
@@ -519,14 +540,17 @@ function buildTab(measure, stringCount) {
     return svg;
 }
 
-function renderNotation(containerId, measure, timeSig) {
+function renderNotation(containerId, measure, timeSig, globalKey) {
     const { Factory, StaveNote } = Vex.Flow;
 
     const el = document.getElementById(containerId);
     if (!el || !measure.beats || measure.beats.length === 0) return;
 
+    const keySig = globalKeyToVexKeySig(globalKey);
+    // Extra width for key signature sharps/flats
+    const keySigWidth = keySig && keySig !== "C" ? 30 : 0;
     // Calculate width based on number of beats
-    const width = Math.max(300, measure.beats.length * 45 + 80);
+    const width = Math.max(300, measure.beats.length * 45 + 80 + keySigWidth);
 
     try {
         const vf = new Factory({
@@ -566,7 +590,9 @@ function renderNotation(containerId, measure, timeSig) {
         const voice = score.voice(vexNotes, { time: timeSig });
         voice.setMode(Vex.Flow.Voice.Mode.SOFT);
 
-        system.addStave({ voices: [voice] }).addClef("treble").addTimeSignature(timeSig);
+        const stave = system.addStave({ voices: [voice] }).addClef("treble");
+        if (keySig) stave.addKeySignature(keySig);
+        stave.addTimeSignature(timeSig);
 
         vf.draw();
 
@@ -751,7 +777,7 @@ function renderMeasures(track) {
         measuresEl.appendChild(card);
 
         // Render VexFlow notation after the DOM element exists
-        renderNotation(notationId, m, m.time_sig);
+        renderNotation(notationId, m, m.time_sig, m.global_key);
 
         // Attach tooltip handlers for tab fret numbers
         card.querySelectorAll("[data-tip-pitch]").forEach((el) => {
