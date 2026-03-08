@@ -29,6 +29,19 @@ _STANDARD_QUALITIES = {
     "suspended-second", "suspended-fourth",
 }
 
+# A valid chord name is a root (A-G with optional #/b/-) followed by an
+# optional suffix of known quality tokens.  Anything else is nonsense.
+import re
+
+_VALID_CHORD_NAME = re.compile(
+    r"^[A-G][#\-b]?"                # root
+    r"(m|min|dim|aug|sus[24]|maj|add)?"  # base quality
+    r"(7|9|11|13|6)?"               # extension
+    r"(b5|#5|b9|#9|#11|b13)?"       # alteration
+    r"\??"                           # optional ? for unrecognized quality
+    r"$"
+)
+
 
 def _short_chord_name(c: m21chord.Chord) -> str:
     """Build a concise chord name like 'Am', 'Bdim', 'Fmaj7'."""
@@ -65,8 +78,8 @@ def _short_chord_name(c: m21chord.Chord) -> str:
     if "suspended" in cn and "second" in cn:
         return root + "sus2"
 
-    # Last resort: root + abbreviated commonName
-    return root + " " + c.commonName
+    # Last resort: try root alone (unrecognized quality)
+    return root + "?"
 
 
 def _identify_chord(midi_values: list[int], beat_position: float) -> ChordInfo | None:

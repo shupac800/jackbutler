@@ -157,6 +157,37 @@ function pitchToVexKey(pitchName) {
     return noteName + "/" + octave;
 }
 
+// Key signature → set of altered note letters with their accidental.
+// Sharp keys: G=F#, D=F#C#, A=F#C#G#, E=…, B=…, F#=…, C#=…
+// Flat keys: F=Bb, Bb=BbEb, Eb=BbEbAb, Ab=…, Db=…, Gb=…
+const KEY_SIG_ACCIDENTALS = (() => {
+    const sharpOrder = ["F", "C", "G", "D", "A", "E", "B"];
+    const flatOrder = ["B", "E", "A", "D", "G", "C", "F"];
+    const sharpKeys = ["C", "G", "D", "A", "E", "B", "F#", "C#"];
+    const flatKeys = ["C", "F", "Bb", "Eb", "Ab", "Db", "Gb"];
+    const map = {};
+    for (let i = 0; i < sharpKeys.length; i++) {
+        const acc = {};
+        for (let j = 0; j < i; j++) acc[sharpOrder[j]] = "#";
+        map[sharpKeys[i]] = acc;
+    }
+    for (let i = 1; i < flatKeys.length; i++) {
+        const acc = {};
+        for (let j = 0; j < i; j++) acc[flatOrder[j]] = "b";
+        map[flatKeys[i]] = acc;
+    }
+    return map;
+})();
+
+// Parse pitch name into {letter, accidental} where accidental is "#", "b", or ""
+function parsePitchAccidental(pitchName) {
+    const match = pitchName.match(/^([A-G])([#\-b]?)/);
+    if (!match) return { letter: "C", accidental: "" };
+    let acc = match[2];
+    if (acc === "-") acc = "b";
+    return { letter: match[1], accidental: acc || "" };
+}
+
 // Pitch class name → semitone number (handles both sharps and flats)
 const PC_TO_SEMI = {
     "C": 0, "C#": 1, "D-": 1, "D": 2, "D#": 3, "E-": 3,
@@ -563,6 +594,9 @@ function renderNotation(containerId, measure, timeSig, globalKey) {
         // Build VexFlow notes from beat data, colored by scale degree
         const vexNotes = [];
         const vexNoteMeta = []; // parallel array: pitch names for each StaveNote
+        const keySigAcc = KEY_SIG_ACCIDENTALS[keySig] || {};
+        // Track active accidentals within the measure (letter+octave → accidental)
+        const activeAcc = {};
         for (const beat of measure.beats) {
             const nonTied = beat.notes.filter((n) => !n.is_tied);
             if (nonTied.length === 0) continue;
@@ -570,6 +604,36 @@ function renderNotation(containerId, measure, timeSig, globalKey) {
             const dur = durationToVex(beat.duration);
             const keys = nonTied.map((n) => pitchToVexKey(n.pitch_name));
             const sn = new StaveNote({ keys: keys, duration: dur });
+
+            // Add explicit accidentals when they differ from key signature
+            for (let ki = 0; ki < nonTied.length; ki++) {
+                const { letter, accidental } = parsePitchAccidental(nonTied[ki].pitch_name);
+                const vexKey = keys[ki]; // e.g. "F/4"
+                const octave = vexKey.split("/")[1];
+                const noteId = letter + octave;
+                const keySigDefault = keySigAcc[letter] || "";
+                const active = activeAcc[noteId];
+
+                // Need accidental if: note differs from key sig default,
+                // or a previous note in this measure altered the expectation
+                let needsAccidental = false;
+                if (active !== undefined) {
+                    // There's been an explicit accidental on this note earlier in the measure
+                    if (accidental !== active) needsAccidental = true;
+                } else {
+                    // Compare against key signature
+                    if (accidental !== keySigDefault) needsAccidental = true;
+                }
+
+                if (needsAccidental) {
+                    const vexAcc = accidental === "" ? "n" : accidental;
+                    sn.addModifier(new Vex.Flow.Accidental(vexAcc), ki);
+                    activeAcc[noteId] = accidental;
+                } else if (accidental !== keySigDefault) {
+                    // Still track even if we didn't need to display
+                    activeAcc[noteId] = accidental;
+                }
+            }
 
             // Color each note key by its scale degree
             for (let ki = 0; ki < nonTied.length; ki++) {
