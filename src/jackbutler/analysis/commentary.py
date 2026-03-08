@@ -36,38 +36,32 @@ def _key_name(k: m21key.Key) -> str:
     return f"{k.tonic.name} {k.mode}"
 
 
+_SEMI_TO_INTERVAL = {
+    0: "R", 1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4",
+    6: "b5", 7: "5", 8: "b6", 9: "6", 10: "b7", 11: "7",
+}
+
+
 def _interval_from_root(pc: str, root_name: str) -> str:
-    """Return the interval name from the chord root to a pitch class (e.g. 'P4', 'm6')."""
+    """Return the interval name from the chord root to a pitch class (e.g. 'b3', '5')."""
     try:
         root = m21pitch.Pitch(root_name + "3")
         target = m21pitch.Pitch(pc + "3")
         # Ensure ascending
         if target.midi < root.midi:
             target.octave += 1
-        iv = m21interval.Interval(root, target)
-        return iv.semiSimpleName
+        semitones = (target.midi - root.midi) % 12
+        return _SEMI_TO_INTERVAL.get(semitones, "?")
     except Exception:
         return "?"
 
 
 def _chord_tone_label(pc: str, chord: m21chord.Chord) -> str:
-    """Return a chord-tone label like 'root', 'b3', '5th', or interval from root."""
+    """Return a chord-tone label like 'R', 'b3', '5', or interval from root."""
     try:
         root_name = chord.root().name
     except Exception:
         return "?"
-    if pc == root_name:
-        return "root"
-    third = chord.third
-    if third and pc == third.name:
-        return "b3" if chord.quality in ("diminished", "minor") else "3rd"
-    fifth = chord.fifth
-    if fifth and pc == fifth.name:
-        return "b5" if chord.quality == "diminished" else "5th"
-    seventh = chord.seventh
-    if seventh and pc == seventh.name:
-        return "7th"
-    # Non-chord tone: label by interval from root
     return _interval_from_root(pc, root_name)
 
 
@@ -285,9 +279,9 @@ class CommentaryGenerator(BaseAnalyzer):
             has_fifth = any(d == 5 for _, _, d in breakdown)
             has_third = any(d == 3 for _, _, d in breakdown)
             if has_root and has_fifth and has_third:
-                parts.append("Tonic triad present (root + 3rd + 5th).")
+                parts.append("Tonic triad present (R + 3 + 5).")
             elif has_root and has_fifth:
-                parts.append("Root + 5th present.")
+                parts.append("R + 5 present.")
 
             harmonic_desc = f"In {ref_key_name}"
 

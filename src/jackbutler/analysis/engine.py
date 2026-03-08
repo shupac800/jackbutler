@@ -36,14 +36,21 @@ def _chord_tone_map(chord_info: ChordInfo) -> dict[str, int]:
     return tone_map
 
 
+_SEMI_TO_INTERVAL = {
+    0: "R", 1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4",
+    6: "b5", 7: "5", 8: "b6", 9: "6", 10: "b7", 11: "7",
+}
+
+
 def _interval_from_root(pc: str, root_name: str) -> str:
-    """Return the interval shorthand from chord root to a pitch class (e.g. 'P4')."""
+    """Return the interval shorthand from chord root to a pitch class (e.g. 'b3', '5')."""
     try:
         root = m21pitch.Pitch(root_name + "3")
         target = m21pitch.Pitch(pc + "3")
         if target.midi < root.midi:
             target.octave += 1
-        return m21interval.Interval(root, target).semiSimpleName
+        semitones = (target.midi - root.midi) % 12
+        return _SEMI_TO_INTERVAL.get(semitones, "?")
     except Exception:
         return "?"
 
@@ -51,18 +58,17 @@ def _interval_from_root(pc: str, root_name: str) -> str:
 def _chord_tone_label(
     ct_deg: int | None, pc: str, chord_root: str | None
 ) -> str:
-    """Return a display label for a pitch in chord context."""
-    if ct_deg == 1:
-        return "root"
-    if ct_deg == 3:
-        return "3rd"
-    if ct_deg == 5:
-        return "5th"
-    if ct_deg == 7:
-        return "7th"
-    # Non-chord tone: show interval from root
+    """Return a display label for a pitch in chord context (e.g. R, b3, 5, b7)."""
     if chord_root:
         return _interval_from_root(pc, chord_root)
+    if ct_deg == 1:
+        return "R"
+    if ct_deg == 3:
+        return "3"
+    if ct_deg == 5:
+        return "5"
+    if ct_deg == 7:
+        return "7"
     return "?"
 
 

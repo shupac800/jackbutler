@@ -91,7 +91,7 @@ function noteTooltipHtml(pitchName, measure) {
         if (match) label = match.split("=")[1];
     }
     const color = label ? degreeColor(
-        { "root": 1, "3rd": 3, "5th": 5, "7th": 7 }[label]
+        { "R": 1, "3": 3, "b3": 3, "5": 5, "b5": 5, "7": 7, "b7": 7 }[label]
     ) : DEFAULT_NOTE_COLOR;
     return `<span style="color:${color}">${pitchName}</span>` +
         (label ? ` <span class="tip-label" style="color:${color}">${label}</span>` : "");
@@ -197,8 +197,8 @@ const PC_TO_SEMI = {
 };
 
 const SEMI_TO_INTERVAL = {
-    0: "P1", 1: "m2", 2: "M2", 3: "m3", 4: "M3", 5: "P4",
-    6: "TT", 7: "P5", 8: "m6", 9: "M6", 10: "m7", 11: "M7",
+    0: "R", 1: "b2", 2: "2", 3: "b3", 4: "3", 5: "4",
+    6: "b5", 7: "5", 8: "b6", 9: "6", 10: "b7", 11: "7",
 };
 
 function pitchClassFromName(pitchName) {
@@ -223,14 +223,14 @@ function buildChordToneMap(chord) {
 
 /** Return a human label for a note's role relative to a chord. */
 function chordToneLabel(degree, noteSemi, rootSemi) {
-    if (degree === 1) return "root";
-    if (degree === 3) return "3rd";
-    if (degree === 5) return "5th";
-    if (degree === 7) return "7th";
     if (rootSemi !== undefined && noteSemi !== undefined) {
         const interval = (noteSemi - rootSemi + 12) % 12;
         return SEMI_TO_INTERVAL[interval] || "?";
     }
+    if (degree === 1) return "R";
+    if (degree === 3) return "3";
+    if (degree === 5) return "5";
+    if (degree === 7) return "7";
     return "?";
 }
 
